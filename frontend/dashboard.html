@@ -1,0 +1,97 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Dashboard · HRMS</title><link rel="icon" href="/favicon.svg"><link rel="stylesheet" href="/css/style.css">
+</head>
+<body data-page="dashboard" data-title="Dashboard" data-subtitle="Today's overview">
+<main id="content" hidden>
+    <section class="hero">
+        <div style="position:relative;z-index:1">
+            <h2 id="welcome">Welcome back</h2>
+            <p id="heroLine">Loading…</p>
+        </div>
+        <div class="actions">
+            <a class="btn btn-light" href="/employee-form">+ Add employee</a>
+            <a class="btn btn-primary" style="background:var(--navy-900)" href="/attendance">Mark attendance</a>
+        </div>
+    </section>
+
+    <section class="grid grid-4 mb">
+        <div class="card stat"><div class="stat-icon tone-purple" data-icon="employees"></div>
+            <div><div class="stat-value" id="statTotal">0</div><div class="stat-label">Total employees</div></div></div>
+        <div class="card stat"><div class="stat-icon tone-green" data-icon="present"></div>
+            <div><div class="stat-value" id="statPresent">0</div><div class="stat-label">Present today</div></div></div>
+        <div class="card stat"><div class="stat-icon tone-red" data-icon="absent"></div>
+            <div><div class="stat-value" id="statAbsent">0</div><div class="stat-label">Absent today</div></div></div>
+        <div class="card stat"><div class="stat-icon tone-amber" data-icon="leaves"></div>
+            <div><div class="stat-value" id="statPending">0</div><div class="stat-label">Pending leave requests</div></div></div>
+    </section>
+
+    <section class="grid grid-3">
+        <div class="card">
+            <div class="card-header"><h3>Attendance today</h3></div>
+            <div class="card-body">
+                <div class="ring" id="attendanceRing"><div><div><strong id="attendancePct">0%</strong><span class="muted small">marked present</span></div></div></div>
+                <div class="list-item"><span>Present</span><strong style="margin-left:auto" id="ringPresent">0</strong></div>
+                <div class="list-item"><span>Absent</span><strong style="margin-left:auto" id="ringAbsent">0</strong></div>
+                <div class="list-item"><span>On leave</span><strong style="margin-left:auto" id="statLeave">0</strong></div>
+                <div class="list-item"><span>Not marked yet</span><strong style="margin-left:auto" id="statNotMarked">0</strong></div>
+            </div>
+        </div>
+        <div class="card">
+            <div class="card-header"><h3>Employees by department</h3></div>
+            <div class="card-body"><div class="bars" id="departmentBars"></div></div>
+        </div>
+        <div class="card">
+            <div class="card-header"><h3>Recently added</h3><a href="/employees" style="margin-left:auto" class="small">View all</a></div>
+            <div class="card-body" style="padding-top:6px" id="recentEmployees"></div>
+            <div class="card-body" style="border-top:1px solid var(--border)">
+                <div class="quick">
+                    <a href="/employee-form"><span data-icon="plus"></span>Add employee</a>
+                    <a href="/attendance"><span data-icon="attendance"></span>Attendance</a>
+                    <a href="/leaves"><span data-icon="leaves"></span>Leave requests</a>
+                    <a href="/departments"><span data-icon="departments"></span>Departments</a>
+                </div>
+            </div>
+        </div>
+    </section>
+</main>
+<script src="/js/api.js"></script><script src="/js/layout.js"></script>
+<script>
+    (async () => {
+        const user = await initPage();
+        if (!user) return;
+        document.querySelectorAll('[data-icon]').forEach(el => { el.innerHTML = icon(el.dataset.icon); });
+        const d = await api('GET', '/api/dashboard');
+        document.getElementById('welcome').textContent = `Welcome back, ${user.name}`;
+        document.getElementById('heroLine').textContent =
+            `${d.active_employees} active employee(s) · ${d.pending_leaves} pending leave request(s) · ${formatDate(d.today)}`;
+        const set = (id, v) => { document.getElementById(id).textContent = v; };
+        set('statTotal', d.total_employees);
+        set('statPresent', d.present_today);
+        set('statAbsent', d.absent_today);
+        set('statPending', d.pending_leaves);
+        set('ringPresent', d.present_today);
+        set('ringAbsent', d.absent_today);
+        set('statLeave', d.on_leave_today);
+        set('statNotMarked', d.not_marked_today);
+        const pct = d.active_employees ? Math.round(d.present_today / d.active_employees * 100) : 0;
+        set('attendancePct', pct + '%');
+        document.getElementById('attendanceRing').style.setProperty('--p', pct);
+
+        const max = Math.max(1, ...d.departments.map(x => x.count));
+        document.getElementById('departmentBars').innerHTML = d.departments.map(x => `
+            <div class="bar-row"><span>${esc(x.name)}</span>
+              <div class="bar-track"><div class="bar-fill" style="width:${x.count / max * 100}%"></div></div>
+              <strong>${x.count}</strong></div>`).join('') || '<p class="muted">No departments yet.</p>';
+
+        document.getElementById('recentEmployees').innerHTML = d.recent_employees.map(e => `
+            <div class="list-item"><span class="avatar sm">${initials(e.full_name)}</span>
+              <div><a href="/employee-form?id=${e.id}" style="font-weight:600;color:var(--text)">${esc(e.full_name)}</a>
+                <div class="muted small">${esc(e.designation)} · ${esc(e.department_name)}</div></div></div>`).join('')
+            || '<div class="empty">No employees yet.</div>';
+    })();
+</script>
+</body>
+</html>

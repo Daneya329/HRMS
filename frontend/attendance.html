@@ -1,0 +1,177 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Attendance · HRMS</title><link rel="icon" href="/favicon.svg"><link rel="stylesheet" href="/css/style.css">
+</head>
+<body data-page="attendance" data-title="Attendance" data-subtitle="Mark and review daily attendance">
+<main id="content" hidden>
+    <div class="tabs">
+        <button class="tab active" id="tabDaily" data-tab="daily">Daily sheet</button>
+        <button class="tab" id="tabHistory" data-tab="history">History</button>
+    </div>
+
+    <section id="panelDaily">
+        <div class="card mb">
+            <div class="card-header">
+                <div class="toolbar"><label for="attDate" style="margin:0">Date</label><input type="date" id="attDate"></div>
+                <span class="muted small" id="lateRule"></span>
+            </div>
+            <div class="table-wrap">
+                <table id="attendanceTable">
+                    <thead><tr><th>Employee</th><th>Status</th><th>Check-in</th><th>Check-out</th><th>Saved</th><th></th></tr></thead>
+                    <tbody></tbody>
+                </table>
+            </div>
+        </div>
+        <div class="card">
+            <div class="card-header"><h3>Quick entry</h3>
+                <span class="muted small">Only one record per employee per day. To change a record use <strong>Update</strong> in the table above.</span></div>
+            <div class="card-body">
+                <form id="quickForm" class="inline-form" novalidate>
+                    <div class="field wide"><label for="quickEmployee">Employee <span class="req">*</span></label>
+                        <select id="quickEmployee" name="employee_id"><option value="">Select…</option></select>
+                        <small class="error-text" data-error-for="employee_id"></small></div>
+                    <div class="field"><label for="quickDate">Date <span class="req">*</span></label>
+                        <input type="date" id="quickDate" name="date"><small class="error-text" data-error-for="date"></small></div>
+                    <div class="field"><label for="quickStatus">Status <span class="req">*</span></label>
+                        <select id="quickStatus" name="status"></select><small class="error-text" data-error-for="status"></small></div>
+                    <div class="field"><label for="quickIn">Check-in</label><input type="time" id="quickIn" name="check_in">
+                        <small class="error-text" data-error-for="check_in"></small></div>
+                    <div class="field"><label for="quickOut">Check-out</label><input type="time" id="quickOut" name="check_out">
+                        <small class="error-text" data-error-for="check_out"></small></div>
+                    <div class="submit"><button class="btn btn-primary" id="quickSaveBtn">Save attendance</button></div>
+                </form>
+            </div>
+        </div>
+    </section>
+
+    <section id="panelHistory" class="hidden">
+        <div class="card">
+            <div class="card-header">
+                <form class="toolbar" id="historyForm">
+                    <select id="historyEmployee" name="employee_id"><option value="">All employees</option></select>
+                    <input type="date" id="historyFrom" name="from" title="From">
+                    <input type="date" id="historyTo" name="to" title="To">
+                    <button class="btn btn-light" id="historyBtn">Filter</button>
+                </form>
+            </div>
+            <div class="table-wrap">
+                <table id="historyTable">
+                    <thead><tr><th>Date</th><th>Employee</th><th>Status</th><th>Check-in</th><th>Check-out</th><th>Hours</th></tr></thead>
+                    <tbody></tbody>
+                </table>
+            </div>
+        </div>
+    </section>
+</main>
+<script src="/js/api.js"></script><script src="/js/layout.js"></script><script src="/js/validation.js"></script>
+<script>
+    let rules;
+    const tbody = document.querySelector('#attendanceTable tbody');
+    const dateInput = document.getElementById('attDate');
+    const hireDates = {};
+
+    const statusOptions = selected => rules.attendanceStatuses
+        .map(s => `<option ${s === selected ? 'selected' : ''}>${s}</option>`).join('');
+
+    function hours(a) {
+        if (!a.check_in || !a.check_out) return '—';
+        const [h1, m1] = a.check_in.split(':').map(Number), [h2, m2] = a.check_out.split(':').map(Number);
+        return ((h2 * 60 + m2 - h1 * 60 - m1) / 60).toFixed(2);
+    }
+
+    async function loadSheet() {
+        const day = dateInput.value;
+        const sheet = await api('GET', `/api/attendance?date=${day}`);
+        tbody.innerHTML = sheet.rows.map(({ employee: e, attendance: a }) => {
+            hireDates[e.id] = e.hire_date;
+            return `
+            <tr data-code="${esc(e.employee_code)}" data-employee="${e.id}" data-attendance="${a ? a.id : ''}">
+              <td><div class="person"><span class="avatar sm">${initials(e.full_name)}</span>
+                <div><div class="name">${esc(e.full_name)}</div><div class="meta">${esc(e.employee_code)} · ${esc(e.department_name)}</div></div></div></td>
+              <td><select class="row-status">${statusOptions(a ? a.status : 'Present')}</select></td>
+              <td><input type="time" class="row-in" value="${a && a.check_in ? a.check_in : ''}"></td>
+              <td><input type="time" class="row-out" value="${a && a.check_out ? a.check_out : ''}"></td>
+              <td class="saved">${a ? statusBadge(a.status) : '<span class="badge b-grey">Not marked</span>'}</td>
+              <td class="actions"><button class="btn btn-sm ${a ? 'btn-light' : 'btn-primary'} row-save">${a ? 'Update' : 'Mark'}</button>
+                <div class="row-error"></div></td>
+            </tr>`;
+        }).join('') || `<tr><td colspan="6"><div class="empty">No active employees were employed on this date.</div></td></tr>`;
+    }
+
+    tbody.addEventListener('click', async (event) => {
+        const button = event.target.closest('.row-save');
+        if (!button) return;
+        const row = button.closest('tr');
+        const errorBox = row.querySelector('.row-error');
+        const data = {
+            employee_id: row.dataset.employee, date: dateInput.value,
+            status: row.querySelector('.row-status').value,
+            check_in: row.querySelector('.row-in').value, check_out: row.querySelector('.row-out').value,
+        };
+        const errors = Validation.attendance(data, rules, todayIso(), hireDates[row.dataset.employee]);
+        errorBox.textContent = Object.values(errors)[0] || '';
+        if (Object.keys(errors).length) return;
+        try {
+            const id = row.dataset.attendance;
+            await api(id ? 'PUT' : 'POST', id ? `/api/attendance/${id}` : '/api/attendance', data);
+            toast(`${row.querySelector('.name').textContent}: ${data.status} saved`);
+            loadSheet();
+        } catch (e) { errorBox.textContent = Object.values(e.errors || {})[0] || e.message; }
+    });
+
+    document.getElementById('quickForm').addEventListener('submit', async (event) => {
+        event.preventDefault();
+        const form = event.target;
+        const data = formData(form);
+        const errors = Validation.attendance(data, rules, todayIso(), hireDates[data.employee_id]);
+        if (!data.employee_id) errors.employee_id = 'Please select an existing employee';
+        showErrors(form, errors);
+        if (Object.keys(errors).length) return;
+        try {
+            await api('POST', '/api/attendance', data);
+            toast('Attendance saved');
+            form.check_in.value = ''; form.check_out.value = '';
+            loadSheet();
+        } catch (e) { showErrors(form, e.errors); if (!e.errors) toast(e.message, 'error'); }
+    });
+
+    async function loadHistory() {
+        const form = document.getElementById('historyForm');
+        const params = new URLSearchParams(Object.entries(formData(form)).filter(([, v]) => v));
+        const list = await api('GET', '/api/attendance/history?' + params);
+        document.querySelector('#historyTable tbody').innerHTML = list.map(a => `
+            <tr><td>${formatDate(a.date)}</td><td><strong>${esc(a.full_name)}</strong> <span class="muted small">${esc(a.employee_code)}</span></td>
+              <td>${statusBadge(a.status)}</td><td>${a.check_in || '—'}</td><td>${a.check_out || '—'}</td><td>${hours(a)}</td></tr>`).join('')
+            || `<tr><td colspan="6"><div class="empty">No attendance records found.</div></td></tr>`;
+    }
+    document.getElementById('historyForm').addEventListener('submit', e => { e.preventDefault(); loadHistory(); });
+
+    document.querySelectorAll('.tab').forEach(tab => tab.addEventListener('click', () => {
+        document.querySelectorAll('.tab').forEach(t => t.classList.toggle('active', t === tab));
+        document.getElementById('panelDaily').classList.toggle('hidden', tab.dataset.tab !== 'daily');
+        document.getElementById('panelHistory').classList.toggle('hidden', tab.dataset.tab !== 'history');
+        if (tab.dataset.tab === 'history') loadHistory();
+    }));
+
+    (async () => {
+        if (!await initPage()) return;
+        rules = await loadRules();
+        const today = todayIso();
+        dateInput.value = today; dateInput.max = today;
+        const quickDate = document.getElementById('quickDate');
+        quickDate.value = today; quickDate.max = today;
+        document.getElementById('quickStatus').innerHTML = statusOptions('Present');
+        document.getElementById('lateRule').textContent = `Late after ${rules.lateAfter} · max ${rules.maxWorkHours} h per shift`;
+        const employees = await api('GET', '/api/employees?status=Active');
+        employees.forEach(e => { hireDates[e.id] = e.hire_date; });
+        const options = employees.map(e => `<option value="${e.id}">${esc(e.full_name)} (${esc(e.employee_code)})</option>`).join('');
+        document.getElementById('quickEmployee').innerHTML += options;
+        document.getElementById('historyEmployee').innerHTML += options;
+        dateInput.addEventListener('change', loadSheet);
+        loadSheet();
+    })();
+</script>
+</body>
+</html>

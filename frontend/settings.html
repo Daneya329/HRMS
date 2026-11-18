@@ -1,0 +1,74 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Settings · HRMS</title><link rel="icon" href="/favicon.svg"><link rel="stylesheet" href="/css/style.css">
+</head>
+<body data-page="settings" data-title="Settings & Rules" data-subtitle="Your account and the business rules the system enforces">
+<main id="content" hidden>
+    <div class="split">
+        <div class="card">
+            <div class="card-header"><h3>Business rules</h3><span class="muted small" style="margin-left:auto">Defined in backend/rules.py</span></div>
+            <div class="table-wrap"><table class="rules-table"><tbody id="rulesTable"></tbody></table></div>
+        </div>
+        <div class="card">
+            <div class="card-header"><h3>Change password</h3></div>
+            <div class="card-body">
+                <form id="passwordForm" novalidate>
+                    <div class="field" style="margin-bottom:12px"><label for="current_password">Current password</label>
+                        <input type="password" id="current_password" name="current_password" autocomplete="current-password">
+                        <small class="error-text" data-error-for="current_password"></small></div>
+                    <div class="field" style="margin-bottom:12px"><label for="new_password">New password</label>
+                        <input type="password" id="new_password" name="new_password" autocomplete="new-password">
+                        <small class="error-text" data-error-for="new_password"></small></div>
+                    <div class="field" style="margin-bottom:16px"><label for="confirm_password">Confirm new password</label>
+                        <input type="password" id="confirm_password" name="confirm_password" autocomplete="new-password">
+                        <small class="error-text" data-error-for="confirm_password"></small></div>
+                    <button class="btn btn-primary" id="changePasswordBtn" style="width:100%">Update password</button>
+                </form>
+            </div>
+        </div>
+    </div>
+</main>
+<script src="/js/api.js"></script><script src="/js/layout.js"></script><script src="/js/validation.js"></script>
+<script>
+    const form = document.getElementById('passwordForm');
+    form.addEventListener('submit', async (event) => {
+        event.preventDefault();
+        const data = formData(form);
+        const errors = Validation.password(data);
+        showErrors(form, errors);
+        if (Object.keys(errors).length) return;
+        try {
+            await api('POST', '/api/account/password', data);
+            form.reset();
+            toast('Password changed');
+        } catch (e) { showErrors(form, e.errors); }
+    });
+
+    (async () => {
+        if (!await initPage()) return;
+        const r = await loadRules();
+        const rows = [
+            ['Age on hire date', `${r.minAge} to ${r.maxAge} years`],
+            ...Object.entries(r.minWage).map(([t, w]) => [`Minimum wage – ${t}`, `${money(w, r.currency)} / month`]),
+            ['Maximum salary', money(r.maxSalary, r.currency)],
+            ['Earliest hire date', `${formatDate(r.companyFounded)} (company founded)`],
+            ['Latest hire date', `Today + ${r.maxHireDaysAhead} days`],
+            ['Name', `${r.nameMinLength}–${r.nameMaxLength} letters (spaces, ' and - allowed)`],
+            ['Phone', `${r.phoneDigitsMin}–${r.phoneDigitsMax} digits`],
+            ['CNIC', 'Format 12345-1234567-1, unique'],
+            ['Email', 'Valid format, unique'],
+            ['Attendance', `One record per employee per day, not in the future, not before the hire date`],
+            ['Late arrival', `Check-in after ${r.lateAfter} must be marked Late`],
+            ['Working hours', `Check-out after check-in, at most ${r.maxWorkHours} h; Half Day at most ${r.halfDayMaxHours} h`],
+            ...Object.entries(r.leaveEntitlement).map(([t, n]) => [`${t} leave`, `${n} days per year`]),
+            ['Leave request', `Not in the past, at most ${r.maxLeaveDaysPerRequest} days, no overlaps`],
+            ['Rejection', 'Requires a reason'],
+            ['Login', 'Account locked for 5 minutes after 5 failed attempts'],
+        ];
+        document.getElementById('rulesTable').innerHTML = rows.map(([k, v]) => `<tr><td>${esc(k)}</td><td>${esc(v)}</td></tr>`).join('');
+    })();
+</script>
+</body>
+</html>

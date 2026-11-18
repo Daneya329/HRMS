@@ -1,0 +1,150 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Leave Management · HRMS</title><link rel="icon" href="/favicon.svg"><link rel="stylesheet" href="/css/style.css">
+</head>
+<body data-page="leaves" data-title="Leave Management" data-subtitle="Apply, approve and track leave">
+<main id="content" hidden>
+    <div class="card mb">
+        <div class="card-header"><h3>New leave request</h3><span class="hint" id="balanceHint"></span></div>
+        <div class="card-body">
+            <form id="leaveForm" class="inline-form" novalidate>
+                <div class="field"><label for="leaveEmployee">Employee <span class="req">*</span></label>
+                    <select id="leaveEmployee" name="employee_id"><option value="">Select…</option></select>
+                    <small class="error-text" data-error-for="employee_id"></small></div>
+                <div class="field"><label for="leaveType">Leave type <span class="req">*</span></label>
+                    <select id="leaveType" name="leave_type"></select><small class="error-text" data-error-for="leave_type"></small></div>
+                <div class="field"><label for="startDate">From <span class="req">*</span></label><input type="date" id="startDate" name="start_date">
+                    <small class="error-text" data-error-for="start_date"></small></div>
+                <div class="field"><label for="endDate">To <span class="req">*</span></label><input type="date" id="endDate" name="end_date">
+                    <small class="error-text" data-error-for="end_date"></small><small class="hint" id="daysHint"></small></div>
+                <div class="field wide"><label for="reason">Reason <span class="req">*</span></label>
+                    <input id="reason" name="reason" maxlength="220" placeholder="e.g. Family wedding">
+                    <small class="error-text" data-error-for="reason"></small></div>
+                <div class="submit"><button class="btn btn-primary" id="applyBtn">Submit request</button></div>
+            </form>
+        </div>
+    </div>
+    <div class="card">
+        <div class="card-header">
+            <div class="tabs" style="margin:0" id="statusTabs">
+                <button class="tab active" data-status="">All</button>
+                <button class="tab" data-status="Pending" id="tabPending">Pending</button>
+                <button class="tab" data-status="Approved">Approved</button>
+                <button class="tab" data-status="Rejected">Rejected</button>
+            </div>
+        </div>
+        <div class="table-wrap">
+            <table id="leaveTable">
+                <thead><tr><th>Employee</th><th>Type</th><th>Dates</th><th>Days</th><th>Reason</th><th>Status</th><th></th></tr></thead>
+                <tbody></tbody>
+            </table>
+        </div>
+    </div>
+</main>
+<script src="/js/api.js"></script><script src="/js/layout.js"></script><script src="/js/validation.js"></script>
+<script>
+    let rules, balance = null, currentStatus = '';
+    const tbody = document.querySelector('#leaveTable tbody');
+    const form = document.getElementById('leaveForm');
+
+    async function load() {
+        const list = await api('GET', '/api/leaves' + (currentStatus ? `?status=${currentStatus}` : ''));
+        tbody.innerHTML = list.map(l => `
+          <tr data-id="${l.id}" data-employee="${esc(l.full_name)}">
+            <td><strong>${esc(l.full_name)}</strong><div class="muted small">${esc(l.employee_code)}</div></td>
+            <td><span class="badge b-purple">${esc(l.leave_type)}</span></td>
+            <td style="white-space:nowrap">${formatDate(l.start_date)} – ${formatDate(l.end_date)}</td>
+            <td>${l.days}</td>
+            <td class="small" style="max-width:220px">${esc(l.reason)}${l.remarks ? `<div class="muted">Remarks: ${esc(l.remarks)}</div>` : ''}</td>
+            <td class="leave-status">${statusBadge(l.status)}</td>
+            <td class="actions">${l.status === 'Pending' ? `
+              <button class="btn btn-soft-success btn-sm approve">${icon('check')} Approve</button>
+              <button class="btn btn-soft-danger btn-sm reject">${icon('x')} Reject</button>` : ''}</td>
+          </tr>`).join('') || `<tr><td colspan="7"><div class="empty">No leave requests here.</div></td></tr>`;
+    }
+
+    async function refreshBalance() {
+        const hint = document.getElementById('balanceHint');
+        balance = null;
+        if (!form.employee_id.value) { hint.textContent = ''; return; }
+        balance = await api('GET', `/api/employees/${form.employee_id.value}/leave-balance`);
+        const b = balance[form.leave_type.value];
+        hint.textContent = b ? `${b.remaining} of ${b.entitlement} ${form.leave_type.value} day(s) left this year` : '';
+    }
+
+    function updateDays() {
+        const days = Validation.leaveDays(form.start_date.value, form.end_date.value);
+        document.getElementById('daysHint').textContent = days > 0 ? `${days} day(s) requested` : '';
+    }
+
+    form.employee_id.addEventListener('change', refreshBalance);
+    form.leave_type.addEventListener('change', refreshBalance);
+    form.start_date.addEventListener('change', () => { form.end_date.min = form.start_date.value; updateDays(); });
+    form.end_date.addEventListener('change', updateDays);
+
+    form.addEventListener('submit', async (event) => {
+        event.preventDefault();
+        const data = formData(form);
+        const remaining = balance && balance[data.leave_type] ? balance[data.leave_type].remaining : null;
+        const errors = Validation.leave(data, rules, todayIso(), remaining);
+        if (!data.employee_id) errors.employee_id = 'Please select an existing employee';
+        showErrors(form, errors);
+        if (Object.keys(errors).length) return;
+        try {
+            await api('POST', '/api/leaves', data);
+            toast('Leave request submitted (Pending)');
+            form.reason.value = ''; form.start_date.value = ''; form.end_date.value = '';
+            updateDays(); refreshBalance(); load();
+        } catch (e) { showErrors(form, e.errors); if (!e.errors) toast(e.message, 'error'); }
+    });
+
+    tbody.addEventListener('click', async (event) => {
+        const row = event.target.closest('tr');
+        if (!row) return;
+        if (event.target.closest('.approve')) {
+            try {
+                await api('POST', `/api/leaves/${row.dataset.id}/approve`, {});
+                toast(`Leave of ${row.dataset.employee} approved`);
+                load(); refreshBalance();
+            } catch (e) { toast(e.message, 'error'); }
+        }
+        if (event.target.closest('.reject')) {
+            formDialog(`Reject leave of ${row.dataset.employee}`, `
+                <div class="field"><label for="remarks">Reason for rejection <span class="req">*</span></label>
+                  <textarea id="remarks" name="remarks"></textarea><small class="error-text" data-error-for="remarks"></small></div>`,
+                'Reject request', async (dialogForm) => {
+                    const data = formData(dialogForm);
+                    if (data.remarks.length < rules.reasonMinLength) {
+                        showErrors(dialogForm, { remarks: `Please give a rejection reason (at least ${rules.reasonMinLength} characters)` });
+                        return false;
+                    }
+                    try {
+                        await api('POST', `/api/leaves/${row.dataset.id}/reject`, data);
+                        toast(`Leave of ${row.dataset.employee} rejected`);
+                        load(); refreshBalance();
+                        return true;
+                    } catch (e) { showErrors(dialogForm, e.errors); return false; }
+                });
+        }
+    });
+
+    document.querySelectorAll('#statusTabs .tab').forEach(tab => tab.addEventListener('click', () => {
+        document.querySelectorAll('#statusTabs .tab').forEach(t => t.classList.toggle('active', t === tab));
+        currentStatus = tab.dataset.status;
+        load();
+    }));
+
+    (async () => {
+        if (!await initPage()) return;
+        rules = await loadRules();
+        form.leave_type.innerHTML = Object.keys(rules.leaveEntitlement).map(t => `<option>${t}</option>`).join('');
+        form.start_date.min = todayIso();
+        const employees = await api('GET', '/api/employees?status=Active');
+        form.employee_id.innerHTML += employees.map(e => `<option value="${e.id}">${esc(e.full_name)} (${esc(e.employee_code)})</option>`).join('');
+        load();
+    })();
+</script>
+</body>
+</html>

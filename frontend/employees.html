@@ -1,0 +1,91 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Employees · HRMS</title><link rel="icon" href="/favicon.svg"><link rel="stylesheet" href="/css/style.css">
+</head>
+<body data-page="employees" data-title="Employees" data-subtitle="Your employee directory">
+<main id="content" hidden>
+    <div class="card">
+        <div class="card-header">
+            <div class="toolbar">
+                <div class="search"><span data-icon="search"></span>
+                    <input type="search" id="search" placeholder="Search name, employee ID, email or CNIC"></div>
+                <select id="filterDepartment"><option value="">All departments</option></select>
+                <select id="filterStatus"><option value="">All statuses</option><option>Active</option><option>Inactive</option></select>
+            </div>
+            <span class="muted small" id="resultCount"></span>
+            <a class="btn btn-primary" href="/employee-form" id="addEmployeeBtn"><span data-icon="plus"></span> Add employee</a>
+        </div>
+        <div class="table-wrap">
+            <table id="employeeTable">
+                <thead><tr><th>ID</th><th>Employee</th><th>Department</th><th>Designation</th><th>Type</th>
+                    <th>Hire date</th><th>Salary</th><th>Status</th><th></th></tr></thead>
+                <tbody></tbody>
+            </table>
+        </div>
+    </div>
+</main>
+<script src="/js/api.js"></script><script src="/js/layout.js"></script>
+<script>
+    let rules;
+    const tbody = document.querySelector('#employeeTable tbody');
+
+    async function load() {
+        const params = new URLSearchParams();
+        const q = document.getElementById('search').value.trim();
+        const dept = document.getElementById('filterDepartment').value;
+        const status = document.getElementById('filterStatus').value;
+        if (q) params.set('q', q);
+        if (dept) params.set('department_id', dept);
+        if (status) params.set('status', status);
+        const list = await api('GET', '/api/employees?' + params);
+        document.getElementById('resultCount').textContent = `${list.length} employee(s)`;
+        tbody.innerHTML = list.map(e => `
+          <tr data-code="${esc(e.employee_code)}" data-id="${e.id}">
+            <td class="muted code">${esc(e.employee_code)}</td>
+            <td><div class="person"><span class="avatar sm">${initials(e.full_name)}</span>
+                <div><div class="name">${esc(e.full_name)}</div><div class="meta">${esc(e.email)}</div></div></div></td>
+            <td class="department">${esc(e.department_name)}</td>
+            <td class="designation">${esc(e.designation)}</td>
+            <td><span class="badge b-purple">${esc(e.employment_type)}</span></td>
+            <td class="hire-date">${formatDate(e.hire_date)}</td>
+            <td class="salary">${money(e.salary, rules.currency)}</td>
+            <td class="status">${statusBadge(e.status)}</td>
+            <td class="actions">
+              <a class="btn btn-light btn-icon btn-sm edit" title="Edit" href="/employee-form?id=${e.id}">${icon('edit')}</a>
+              <button class="btn btn-soft-danger btn-icon btn-sm delete" title="Delete">${icon('trash')}</button>
+            </td>
+          </tr>`).join('') || `<tr><td colspan="9"><div class="empty" id="noResults">${icon('employees')}
+             ${q || dept || status ? 'No employees match your filters.' : 'No employees yet. Click “Add employee” to create the first one.'}</div></td></tr>`;
+    }
+
+    tbody.addEventListener('click', async (event) => {
+        const button = event.target.closest('button.delete');
+        if (!button) return;
+        const row = button.closest('tr');
+        const name = row.querySelector('.name').textContent;
+        if (!await confirmDialog('Delete employee', `Delete ${name}? Their attendance and leave records are deleted too. This cannot be undone.`)) return;
+        try {
+            await api('DELETE', `/api/employees/${row.dataset.id}`);
+            toast(`${name} was deleted`);
+            load();
+        } catch (e) { toast(e.message, 'error'); }
+    });
+
+    (async () => {
+        if (!await initPage()) return;
+        document.querySelectorAll('[data-icon]').forEach(el => { el.innerHTML = icon(el.dataset.icon); });
+        rules = await loadRules();
+        const departments = await api('GET', '/api/departments');
+        document.getElementById('filterDepartment').innerHTML += departments
+            .map(d => `<option value="${d.id}">${esc(d.name)}</option>`).join('');
+        let timer;
+        document.getElementById('search').addEventListener('input', () => { clearTimeout(timer); timer = setTimeout(load, 250); });
+        document.getElementById('filterDepartment').addEventListener('change', load);
+        document.getElementById('filterStatus').addEventListener('change', load);
+        load();
+    })();
+</script>
+</body>
+</html>

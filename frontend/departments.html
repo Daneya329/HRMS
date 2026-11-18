@@ -1,0 +1,104 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Departments · HRMS</title><link rel="icon" href="/favicon.svg"><link rel="stylesheet" href="/css/style.css">
+</head>
+<body data-page="departments" data-title="Departments" data-subtitle="Organise your teams">
+<main id="content" hidden>
+    <div class="split">
+        <div class="card">
+            <div class="card-header"><h3>All departments</h3><span class="badge b-purple" id="deptCount">0</span></div>
+            <div class="table-wrap">
+                <table id="departmentTable">
+                    <thead><tr><th>Name</th><th>Description</th><th>Employees</th><th></th></tr></thead>
+                    <tbody></tbody>
+                </table>
+            </div>
+        </div>
+        <div class="card">
+            <div class="card-header"><h3>New department</h3></div>
+            <div class="card-body">
+                <form id="departmentForm" novalidate>
+                    <div class="field" style="margin-bottom:14px"><label for="deptName">Name <span class="req">*</span></label>
+                        <input id="deptName" name="name" maxlength="60"><small class="error-text" data-error-for="name"></small></div>
+                    <div class="field" style="margin-bottom:16px"><label for="deptDescription">Description</label>
+                        <textarea id="deptDescription" name="description" maxlength="250"></textarea><small class="error-text" data-error-for="description"></small></div>
+                    <button class="btn btn-primary" id="addDeptBtn" style="width:100%">Create department</button>
+                </form>
+                <p class="muted small" style="margin:14px 0 0">A department can only be deleted when no employees belong to it.</p>
+            </div>
+        </div>
+    </div>
+</main>
+<script src="/js/api.js"></script><script src="/js/layout.js"></script><script src="/js/validation.js"></script>
+<script>
+    const tbody = document.querySelector('#departmentTable tbody');
+    const form = document.getElementById('departmentForm');
+
+    async function load() {
+        const list = await api('GET', '/api/departments');
+        document.getElementById('deptCount').textContent = list.length;
+        tbody.innerHTML = list.map(d => `
+            <tr data-id="${d.id}" data-name="${esc(d.name)}">
+              <td class="name" style="font-weight:600">${esc(d.name)}</td>
+              <td class="muted small description">${esc(d.description) || '—'}</td>
+              <td><span class="badge b-purple count">${d.employee_count}</span></td>
+              <td class="actions">
+                <button class="btn btn-light btn-icon btn-sm edit" title="Edit">${icon('edit')}</button>
+                <button class="btn btn-soft-danger btn-icon btn-sm delete" title="Delete">${icon('trash')}</button>
+              </td></tr>`).join('') || `<tr><td colspan="4"><div class="empty">No departments yet.</div></td></tr>`;
+    }
+
+    form.addEventListener('submit', async (event) => {
+        event.preventDefault();
+        const data = formData(form);
+        const errors = Validation.department(data);
+        showErrors(form, errors);
+        if (Object.keys(errors).length) return;
+        try {
+            const d = await api('POST', '/api/departments', data);
+            form.reset();
+            toast(`Department “${d.name}” created`);
+            load();
+        } catch (e) { showErrors(form, e.errors); if (!e.errors || !Object.keys(e.errors).length) toast(e.message, 'error'); }
+    });
+
+    tbody.addEventListener('click', async (event) => {
+        const row = event.target.closest('tr');
+        if (!row) return;
+        const name = row.dataset.name;
+        if (event.target.closest('button.delete')) {
+            if (!await confirmDialog('Delete department', `Delete the department “${name}”?`)) return;
+            try {
+                await api('DELETE', `/api/departments/${row.dataset.id}`);
+                toast(`Department “${name}” deleted`);
+                load();
+            } catch (e) { toast(e.message, 'error'); }
+        }
+        if (event.target.closest('button.edit')) {
+            const description = row.querySelector('.description').textContent;
+            formDialog('Edit department', `
+                <div class="field" style="margin-bottom:12px"><label for="editName">Name</label>
+                  <input id="editName" name="name" value="${esc(name)}"><small class="error-text" data-error-for="name"></small></div>
+                <div class="field"><label for="editDescription">Description</label>
+                  <textarea id="editDescription" name="description">${esc(description === '—' ? '' : description)}</textarea>
+                  <small class="error-text" data-error-for="description"></small></div>`, 'Save', async (dialogForm) => {
+                const data = formData(dialogForm);
+                const errors = Validation.department(data);
+                showErrors(dialogForm, errors);
+                if (Object.keys(errors).length) return false;
+                try {
+                    await api('PUT', `/api/departments/${row.dataset.id}`, data);
+                    toast('Department updated');
+                    load();
+                    return true;
+                } catch (e) { showErrors(dialogForm, e.errors); return false; }
+            });
+        }
+    });
+
+    (async () => { if (await initPage()) load(); })();
+</script>
+</body>
+</html>
